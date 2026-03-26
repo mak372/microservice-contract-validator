@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go_project/config"
+	"go_project/logger"
 	"go_project/validator"
 	"io"
 	"net/http"
@@ -14,6 +15,11 @@ import (
 var contract *config.Contract
 
 func main() {
+	if err := logger.Init(); err != nil {
+		fmt.Println("Failed to initialize logger:", err)
+		return
+	}
+	defer logger.Log.Sync()
 	// Load contract file
 	var err error
 	contract, err = config.LoadContract("contracts/user-service.json")

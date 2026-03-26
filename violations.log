@@ -1,0 +1,2 @@
+{"level":"warn","timestamp":"2026-03-25T19:28:45.964-0700","msg":"Contract violation detected","endpoint":"/api/user","method":"POST","direction":"REQUEST","field":"age","issue":"wrong type","expected":"number","got":"string","timestamp":"2026-03-25T19:28:45-07:00"}
+{"level":"info","timestamp":"2026-03-25T19:28:45.981-0700","msg":"Contract OK","endpoint":"/api/user","method":"POST","direction":"RESPONSE","timestamp":"2026-03-25T19:28:45-07:00"}
