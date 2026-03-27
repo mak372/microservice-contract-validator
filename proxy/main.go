@@ -37,9 +37,6 @@ func main() {
 		fmt.Println("No contract file found — POST to /contract to load one")
 	}
 
-	target, _ := url.Parse("http://localhost:8002")
-	proxy := httputil.NewSingleHostReverseProxy(target)
-
 	// POST /contract — dynamically update the contract without restarting
 	http.HandleFunc("/contract", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -56,8 +53,8 @@ func main() {
 			http.Error(w, "invalid JSON contract: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if c.Endpoint == "" || c.Method == "" || len(c.Request) == 0 {
-			http.Error(w, "contract must have endpoint, method, and request fields", http.StatusBadRequest)
+		if c.Endpoint == "" || c.Method == "" || c.Target == "" || len(c.Request) == 0 {
+			http.Error(w, "contract must have endpoint, method, target, and request fields", http.StatusBadRequest)
 			return
 		}
 		key := c.Method + " " + c.Endpoint
@@ -102,28 +99,36 @@ func main() {
 			}
 		}
 
-		// --- Forward to Service B and capture response ---
+		// --- Forward to upstream defined in contract ---
 		recorder := newResponseRecorder()
-		proxy.ServeHTTP(recorder, r)
+		if c != nil {
+			target, err := url.Parse(c.Target)
+			if err != nil {
+				http.Error(w, "invalid contract target: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
+		} else {
+			http.Error(w, "no contract found for this endpoint", http.StatusNotFound)
+			return
+		}
 
 		// --- Validate RESPONSE before sending back to Service A ---
 		fmt.Println("=== OUTGOING RESPONSE ===")
 		fmt.Printf("Status: %d\n", recorder.status)
 		fmt.Printf("Body: %s\n", recorder.body.String())
 
-		if c != nil {
-			violations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
-			if len(violations) > 0 {
-				fmt.Println("RESPONSE blocked — contract violations found, not sending to Service A")
-				fmt.Println("========================")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadGateway)
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"error":      "response from Service B violates contract",
-					"violations": violations,
-				})
-				return
-			}
+		violations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
+		if len(violations) > 0 {
+			fmt.Println("RESPONSE blocked — contract violations found, not sending to Service A")
+			fmt.Println("========================")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":      "response from Service B violates contract",
+				"violations": violations,
+			})
+			return
 		}
 
 		// Validation passed — send the response to Service A
