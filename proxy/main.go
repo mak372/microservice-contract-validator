@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	contract *config.Contract
-	mu       sync.RWMutex
+	contracts map[string]*config.Contract
+	mu        sync.RWMutex
 )
 
 func main() {
@@ -26,10 +26,13 @@ func main() {
 	}
 	defer logger.Log.Sync()
 
+	contracts = make(map[string]*config.Contract)
+
 	// Load contract file as initial default (optional — can be overridden via POST /contract)
 	if c, err := config.LoadContract("contracts/user-service.json"); err == nil {
-		contract = c
-		fmt.Println("Contract loaded from file for endpoint:", contract.Endpoint)
+		key := c.Method + " " + c.Endpoint
+		contracts[key] = c
+		fmt.Println("Contract loaded from file for endpoint:", key)
 	} else {
 		fmt.Println("No contract file found — POST to /contract to load one")
 	}
@@ -57,14 +60,15 @@ func main() {
 			http.Error(w, "contract must have endpoint, method, and request fields", http.StatusBadRequest)
 			return
 		}
+		key := c.Method + " " + c.Endpoint
 		mu.Lock()
-		contract = &c
+		contracts[key] = &c
 		mu.Unlock()
-		fmt.Printf("Contract updated: %s %s\n", c.Method, c.Endpoint)
+		fmt.Printf("Contract added: %s\n", key)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message":  "contract updated",
-			"endpoint": c.Method + " " + c.Endpoint,
+			"message":  "contract added",
+			"endpoint": key,
 		})
 	})
 
@@ -78,11 +82,12 @@ func main() {
 		fmt.Printf("Endpoint: %s %s\n", r.Method, r.URL.Path)
 		fmt.Printf("Body: %s\n", string(reqBody))
 
+		key := r.Method + " " + r.URL.Path
 		mu.RLock()
-		c := contract
+		c := contracts[key]
 		mu.RUnlock()
 
-		if c != nil && r.URL.Path == c.Endpoint && r.Method == c.Method {
+		if c != nil {
 			violations := validator.ValidateJSON(reqBody, c.Request, "REQUEST", c)
 			if len(violations) > 0 {
 				fmt.Println("REQUEST blocked — contract violations found, not forwarding to Service B")
@@ -106,7 +111,7 @@ func main() {
 		fmt.Printf("Status: %d\n", recorder.status)
 		fmt.Printf("Body: %s\n", recorder.body.String())
 
-		if c != nil && r.URL.Path == c.Endpoint && r.Method == c.Method {
+		if c != nil {
 			violations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
 			if len(violations) > 0 {
 				fmt.Println("RESPONSE blocked — contract violations found, not sending to Service A")
