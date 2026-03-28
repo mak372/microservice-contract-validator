@@ -12,12 +12,42 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sync"
+	"time"
 )
 
 var (
-	contracts map[string]*config.Contract
-	mu        sync.RWMutex
+	contracts    map[string]*config.Contract
+	mu           sync.RWMutex
+	violationLog []ViolationRecord
+	vMu          sync.RWMutex
 )
+
+type ViolationRecord struct {
+	Timestamp  string               `json:"timestamp"`
+	Endpoint   string               `json:"endpoint"`
+	Method     string               `json:"method"`
+	Direction  string               `json:"direction"`
+	Violations []validator.Violation `json:"violations"`
+}
+
+func corsHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+func storeViolations(endpoint, method, direction string, violations []validator.Violation) {
+	record := ViolationRecord{
+		Timestamp:  time.Now().Format(time.RFC3339),
+		Endpoint:   endpoint,
+		Method:     method,
+		Direction:  direction,
+		Violations: violations,
+	}
+	vMu.Lock()
+	violationLog = append(violationLog, record)
+	vMu.Unlock()
+}
 
 func main() {
 	if err := logger.Init(); err != nil {
@@ -27,8 +57,8 @@ func main() {
 	defer logger.Log.Sync()
 
 	contracts = make(map[string]*config.Contract)
+	violationLog = []ViolationRecord{}
 
-	// Load contract file as initial default (optional — can be overridden via POST /contract)
 	if c, err := config.LoadContract("contracts/user-service.json"); err == nil {
 		key := c.Method + " " + c.Endpoint
 		contracts[key] = c
@@ -37,8 +67,13 @@ func main() {
 		fmt.Println("No contract file found — POST to /contract to load one")
 	}
 
-	// POST /contract — dynamically update the contract without restarting
+	// POST /contract — register a new contract
 	http.HandleFunc("/contract", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -69,9 +104,52 @@ func main() {
 		})
 	})
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	// GET /contracts — list all loaded contracts
+	http.HandleFunc("/contracts", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		mu.RLock()
+		result := make([]config.Contract, 0, len(contracts))
+		for _, c := range contracts {
+			result = append(result, *c)
+		}
+		mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	})
 
-		// --- Validate REQUEST before forwarding to Service B ---
+	// GET /violations — return in-memory violation history
+	http.HandleFunc("/violations", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		vMu.RLock()
+		defer vMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(violationLog)
+	})
+
+	// / — main proxy handler
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		reqBody, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 
@@ -84,54 +162,55 @@ func main() {
 		c := contracts[key]
 		mu.RUnlock()
 
-		if c != nil {
-			violations := validator.ValidateJSON(reqBody, c.Request, "REQUEST", c)
-			if len(violations) > 0 {
-				fmt.Println("REQUEST blocked — contract violations found, not forwarding to Service B")
-				fmt.Println("========================")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"error":      "request violates contract",
-					"violations": violations,
-				})
-				return
-			}
-		}
-
-		// --- Forward to upstream defined in contract ---
-		recorder := newResponseRecorder()
-		if c != nil {
-			target, err := url.Parse(c.Target)
-			if err != nil {
-				http.Error(w, "invalid contract target: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-			httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
-		} else {
-			http.Error(w, "no contract found for this endpoint", http.StatusNotFound)
-			return
-		}
-
-		// --- Validate RESPONSE before sending back to Service A ---
-		fmt.Println("=== OUTGOING RESPONSE ===")
-		fmt.Printf("Status: %d\n", recorder.status)
-		fmt.Printf("Body: %s\n", recorder.body.String())
-
-		violations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
-		if len(violations) > 0 {
-			fmt.Println("RESPONSE blocked — contract violations found, not sending to Service A")
-			fmt.Println("========================")
+		if c == nil {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
+			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error":      "response from Service B violates contract",
-				"violations": violations,
+				"error": "no contract found for this endpoint",
 			})
 			return
 		}
 
-		// Validation passed — send the response to Service A
+		reqViolations := validator.ValidateJSON(reqBody, c.Request, "REQUEST", c)
+		if len(reqViolations) > 0 {
+			fmt.Println("REQUEST blocked — contract violations found")
+			fmt.Println("========================")
+			storeViolations(c.Endpoint, c.Method, "REQUEST", reqViolations)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":      "request violates contract",
+				"violations": reqViolations,
+			})
+			return
+		}
+
+		recorder := newResponseRecorder()
+		target, err := url.Parse(c.Target)
+		if err != nil {
+			http.Error(w, "invalid contract target: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
+
+		fmt.Println("=== OUTGOING RESPONSE ===")
+		fmt.Printf("Status: %d\n", recorder.status)
+		fmt.Printf("Body: %s\n", recorder.body.String())
+
+		respViolations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
+		if len(respViolations) > 0 {
+			fmt.Println("RESPONSE blocked — contract violations found")
+			fmt.Println("========================")
+			storeViolations(c.Endpoint, c.Method, "RESPONSE", respViolations)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":      "response from upstream violates contract",
+				"violations": respViolations,
+			})
+			return
+		}
+
 		for k, v := range recorder.header {
 			for _, vv := range v {
 				w.Header().Add(k, vv)
@@ -147,8 +226,6 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 }
 
-// ResponseRecorder buffers the response from Service B without sending it to the client.
-// This allows the proxy to validate the response before deciding to send it.
 type ResponseRecorder struct {
 	header http.Header
 	status int
