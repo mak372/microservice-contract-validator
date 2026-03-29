@@ -33,11 +33,11 @@ export default function ViolationsLog() {
           {[...violations].reverse().map((record, i) => (
             <div key={i} className="violation-record">
               <div className="violation-record-header">
-                <span className={`badge ${record.Direction === "REQUEST" ? "badge-request" : "badge-response"}`}>
-                  {record.Direction}
+                <span className={`badge ${record.direction === "REQUEST" ? "badge-request" : "badge-response"}`}>
+                  {record.direction}
                 </span>
-                <span className="violation-endpoint">{record.Method} {record.Endpoint}</span>
-                <span className="violation-time">{new Date(record.Timestamp).toLocaleString()}</span>
+                <span className="violation-endpoint">{record.method} {record.endpoint}</span>
+                <span className="violation-time">{new Date(record.timestamp).toLocaleString()}</span>
               </div>
               <table className="violations-table">
                 <thead>
@@ -49,7 +49,7 @@ export default function ViolationsLog() {
                   </tr>
                 </thead>
                 <tbody>
-                  {record.Violations.map((v, j) => (
+                  {record.violations.map((v, j) => (
                     <tr key={j}>
                       <td>{v.Field}</td>
                       <td>{v.Issue}</td>
