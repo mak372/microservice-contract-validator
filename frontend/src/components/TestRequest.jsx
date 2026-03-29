@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const PROXY = "http://localhost:8080";
+const SERVICE_A = "http://localhost:8001";
 
 export default function TestRequest() {
   const [method, setMethod] = useState("POST");
@@ -32,7 +32,7 @@ export default function TestRequest() {
         options.body = body;
       }
 
-      const res = await fetch(`${PROXY}${endpoint}`, options);
+      const res = await fetch(`${SERVICE_A}/send?endpoint=${endpoint}`, options);
       const data = await res.json();
 
       if (res.ok) {
