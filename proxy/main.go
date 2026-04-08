@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go_project/config"
+	"go_project/db"
 	"go_project/logger"
 	"go_project/validator"
 	"io"
@@ -12,41 +13,17 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sync"
-	"time"
 )
 
 var (
-	contracts    map[string]*config.Contract
-	mu           sync.RWMutex
-	violationLog []ViolationRecord
-	vMu          sync.RWMutex
+	contracts map[string]*config.Contract
+	mu        sync.RWMutex
 )
-
-type ViolationRecord struct {
-	Timestamp  string               `json:"timestamp"`
-	Endpoint   string               `json:"endpoint"`
-	Method     string               `json:"method"`
-	Direction  string               `json:"direction"`
-	Violations []validator.Violation `json:"violations"`
-}
 
 func corsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-}
-
-func storeViolations(endpoint, method, direction string, violations []validator.Violation) {
-	record := ViolationRecord{
-		Timestamp:  time.Now().Format(time.RFC3339),
-		Endpoint:   endpoint,
-		Method:     method,
-		Direction:  direction,
-		Violations: violations,
-	}
-	vMu.Lock()
-	violationLog = append(violationLog, record)
-	vMu.Unlock()
 }
 
 func main() {
@@ -56,15 +33,29 @@ func main() {
 	}
 	defer logger.Log.Sync()
 
-	contracts = make(map[string]*config.Contract)
-	violationLog = []ViolationRecord{}
+	if err := db.Init(); err != nil {
+		fmt.Println("Failed to initialize database:", err)
+		return
+	}
 
-	if c, err := config.LoadContract("contracts/user-service.json"); err == nil {
-		key := c.Method + " " + c.Endpoint
-		contracts[key] = c
-		fmt.Println("Contract loaded from file for endpoint:", key)
+	var err error
+	contracts, err = db.LoadAllContracts()
+	if err != nil {
+		fmt.Println("Failed to load contracts from DB:", err)
+		contracts = make(map[string]*config.Contract)
 	} else {
-		fmt.Println("No contract file found — POST to /contract to load one")
+		fmt.Printf("Loaded %d contract(s) from database\n", len(contracts))
+	}
+
+	if len(contracts) == 0 {
+		if c, err := config.LoadContract("contracts/user-service.json"); err == nil {
+			key := c.Method + " " + c.Endpoint
+			contracts[key] = c
+			db.SaveContract(c)
+			fmt.Println("Contract loaded from file and saved to DB:", key)
+		} else {
+			fmt.Println("No contract file found — POST to /contract to load one")
+		}
 	}
 
 	// POST /contract — register a new contract
@@ -96,6 +87,9 @@ func main() {
 		mu.Lock()
 		contracts[key] = &c
 		mu.Unlock()
+		if err := db.SaveContract(&c); err != nil {
+			fmt.Println("Failed to save contract to DB:", err)
+		}
 		fmt.Printf("Contract added: %s\n", key)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -125,7 +119,7 @@ func main() {
 		json.NewEncoder(w).Encode(result)
 	})
 
-	// GET /violations — return in-memory violation history
+	// GET /violations — return violation history from DB
 	http.HandleFunc("/violations", func(w http.ResponseWriter, r *http.Request) {
 		corsHeaders(w)
 		if r.Method == http.MethodOptions {
@@ -136,10 +130,13 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		vMu.RLock()
-		defer vMu.RUnlock()
+		records, err := db.LoadAllViolations()
+		if err != nil {
+			http.Error(w, "failed to load violations", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(violationLog)
+		json.NewEncoder(w).Encode(records)
 	})
 
 	// / — main proxy handler
@@ -175,7 +172,7 @@ func main() {
 		if len(reqViolations) > 0 {
 			fmt.Println("REQUEST blocked — contract violations found")
 			fmt.Println("========================")
-			storeViolations(c.Endpoint, c.Method, "REQUEST", reqViolations)
+			db.SaveViolation(c.Endpoint, c.Method, "REQUEST", reqViolations)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -201,7 +198,7 @@ func main() {
 		if len(respViolations) > 0 {
 			fmt.Println("RESPONSE blocked — contract violations found")
 			fmt.Println("========================")
-			storeViolations(c.Endpoint, c.Method, "RESPONSE", respViolations)
+			db.SaveViolation(c.Endpoint, c.Method, "RESPONSE", respViolations)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
 			json.NewEncoder(w).Encode(map[string]interface{}{
