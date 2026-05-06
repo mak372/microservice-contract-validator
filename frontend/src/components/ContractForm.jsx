@@ -2,12 +2,16 @@ import { useState } from "react";
 
 const PROXY = import.meta.env.VITE_PROXY_URL || "http://localhost:8080";
 
-export default function ContractForm() {
-  const [method, setMethod] = useState("POST");
-  const [endpoint, setEndpoint] = useState("");
-  const [target, setTarget] = useState("");
-  const [requestSchema, setRequestSchema] = useState("");
-  const [responseSchema, setResponseSchema] = useState("");
+export default function ContractForm({ initialContract, onSaved } = {}) {
+  const [method, setMethod] = useState(initialContract?.method || "POST");
+  const [endpoint, setEndpoint] = useState(initialContract?.endpoint || "");
+  const [target, setTarget] = useState(initialContract?.target || "");
+  const [requestSchema, setRequestSchema] = useState(
+    initialContract?.request ? JSON.stringify(initialContract.request, null, 2) : ""
+  );
+  const [responseSchema, setResponseSchema] = useState(
+    initialContract?.response ? JSON.stringify(initialContract.response, null, 2) : ""
+  );
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -49,6 +53,7 @@ export default function ContractForm() {
       const data = await res.text();
       if (res.ok) {
         setResult({ ok: true, message: `Contract published: ${method} ${endpoint}` });
+        if (onSaved) onSaved();
       } else {
         setResult({ ok: false, message: data });
       }
