@@ -188,6 +188,7 @@ func main() {
 			http.Error(w, "invalid contract target: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		r.Header.Del("Accept-Encoding")
 		httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
 
 		fmt.Println("=== OUTGOING RESPONSE ===")
