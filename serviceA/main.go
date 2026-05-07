@@ -2,67 +2,46 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 )
 
-type KYCRequest struct {
-	CustomerID     string  `json:"customerId"`
-	FullName       string  `json:"fullName"`
-	DateOfBirth    string  `json:"dateOfBirth"`
-	DocumentType   string  `json:"documentType"`
-	DocumentNumber string  `json:"documentNumber"`
-	Address        Address `json:"address"`
-}
-
-type Address struct {
-	Street  string `json:"street"`
-	City    string `json:"city"`
-	Pincode string `json:"pincode"`
+func corsHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
 func main() {
-	// POST /verify — accepts a KYC request, forwards to proxy for contract validation
+	proxyBase := os.Getenv("PROXY_URL")
+	if proxyBase == "" {
+		proxyBase = "http://localhost:8080"
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		corsHeaders(w)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-	})
 
-	http.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
 			return
 		}
 
-		var req KYCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+		req, err := http.NewRequest(r.Method, proxyBase+r.URL.Path, bytes.NewReader(body))
+		if err != nil {
+			http.Error(w, "failed to create request", http.StatusInternalServerError)
 			return
 		}
+		req.Header.Set("Content-Type", "application/json")
 
-		proxyBase := os.Getenv("PROXY_URL")
-		if proxyBase == "" {
-			proxyBase = "http://localhost:8080"
-		}
-
-		payload, _ := json.Marshal(req)
-		resp, err := http.Post(proxyBase+"/api/kyc/verify", "application/json", bytes.NewReader(payload))
+		client := &http.Client{}
+		resp, err := client.Do(req)
 		if err != nil {
 			http.Error(w, "failed to reach proxy: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -80,6 +59,6 @@ func main() {
 		w.Write(respBody)
 	})
 
-	fmt.Println("KYC Verification Service running on :8001")
+	fmt.Println("Service A running on :8001")
 	http.ListenAndServe(":8001", nil)
 }
