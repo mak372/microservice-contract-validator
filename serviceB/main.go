@@ -31,6 +31,32 @@ type KYCResponse struct {
 	VerifiedAt     string  `json:"verifiedAt"`
 }
 
+type CreateUserRequest struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+type CreateUserResponse struct {
+	UserID    string `json:"userId"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type AccountStatusRequest struct {
+	AccountID string `json:"accountId"`
+}
+
+type AccountStatusResponse struct {
+	AccountID string `json:"accountId"`
+	Status    string `json:"status"`
+	Balance   float64 `json:"balance"`
+	Currency  string `json:"currency"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 // In-memory identity registry: documentNumber -> fullName
 var registry = map[string]string{
 	"DL1234567":  "Amit Sharma",
@@ -71,6 +97,49 @@ func main() {
 			VerifiedAt:     time.Now().Format(time.RFC3339),
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	http.HandleFunc("/api/user/create", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req CreateUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		resp := CreateUserResponse{
+			UserID:    fmt.Sprintf("USR-%d", time.Now().UnixNano()),
+			Name:      req.Name,
+			Email:     req.Email,
+			Role:      req.Role,
+			CreatedAt: time.Now().Format(time.RFC3339),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	http.HandleFunc("/api/account/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req AccountStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		statuses := []string{"active", "suspended", "pending"}
+		resp := AccountStatusResponse{
+			AccountID: req.AccountID,
+			Status:    statuses[rand.Intn(len(statuses))],
+			Balance:   float64(rand.Intn(100000)) / 100,
+			Currency:  "INR",
+			UpdatedAt: time.Now().Format(time.RFC3339),
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})
