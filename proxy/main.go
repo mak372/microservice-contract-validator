@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"go_project/config"
@@ -191,11 +192,24 @@ func main() {
 		r.Header.Del("Accept-Encoding")
 		httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
 
+		respBody := recorder.body.Bytes()
+		if recorder.header.Get("Content-Encoding") == "gzip" {
+			gr, err := gzip.NewReader(bytes.NewReader(respBody))
+			if err == nil {
+				decompressed, err := io.ReadAll(gr)
+				gr.Close()
+				if err == nil {
+					respBody = decompressed
+					recorder.header.Del("Content-Encoding")
+				}
+			}
+		}
+
 		fmt.Println("=== OUTGOING RESPONSE ===")
 		fmt.Printf("Status: %d\n", recorder.status)
-		fmt.Printf("Body: %s\n", recorder.body.String())
+		fmt.Printf("Body: %s\n", string(respBody))
 
-		respViolations := validator.ValidateJSON(recorder.body.Bytes(), c.Response, "RESPONSE", c)
+		respViolations := validator.ValidateJSON(respBody, c.Response, "RESPONSE", c)
 		if len(respViolations) > 0 {
 			fmt.Println("RESPONSE blocked — contract violations found")
 			fmt.Println("========================")
@@ -215,7 +229,7 @@ func main() {
 			}
 		}
 		w.WriteHeader(recorder.status)
-		w.Write(recorder.body.Bytes())
+		w.Write(respBody)
 
 		fmt.Println("========================")
 	})
