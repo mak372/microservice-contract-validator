@@ -190,7 +190,9 @@ func main() {
 			return
 		}
 		r.Header.Del("Accept-Encoding")
-		httputil.NewSingleHostReverseProxy(target).ServeHTTP(recorder, r)
+		rp := httputil.NewSingleHostReverseProxy(target)
+		rp.Transport = &http.Transport{DisableCompression: true}
+		rp.ServeHTTP(recorder, r)
 
 		respBody := recorder.body.Bytes()
 		if recorder.header.Get("Content-Encoding") == "gzip" {
