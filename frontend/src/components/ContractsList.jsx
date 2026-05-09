@@ -7,6 +7,20 @@ export default function ContractsList() {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+
+  async function handleDelete(c) {
+    if (!window.confirm(`Delete contract ${c.method} ${c.endpoint}?`)) return;
+    setDeleting(c.method + c.endpoint);
+    try {
+      await fetch(`${PROXY}/contract/delete?method=${encodeURIComponent(c.method)}&endpoint=${encodeURIComponent(c.endpoint)}`, {
+        method: "DELETE",
+      });
+      fetchContracts();
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   async function fetchContracts() {
     setLoading(true);
@@ -59,9 +73,19 @@ export default function ContractsList() {
                 <td style={td}><code>{c.endpoint}</code></td>
                 <td style={td}>{c.target}</td>
                 <td style={td}>
-                  <button className="btn btn-outline" onClick={() => setEditing(c)}>
-                    Edit
-                  </button>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button className="btn btn-outline" onClick={() => setEditing(c)}>
+                      Edit
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      style={{ color: "#e05c5c", borderColor: "#e05c5c" }}
+                      disabled={deleting === c.method + c.endpoint}
+                      onClick={() => handleDelete(c)}
+                    >
+                      {deleting === c.method + c.endpoint ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

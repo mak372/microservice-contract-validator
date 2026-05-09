@@ -92,6 +92,11 @@ func LoadAllContracts() (map[string]*config.Contract, error) {
 	return contracts, nil
 }
 
+func DeleteContract(key string) error {
+	_, err := DB.Exec(`DELETE FROM contracts WHERE key = $1`, key)
+	return err
+}
+
 // Violations
 
 type ViolationRecord struct {

@@ -20,7 +20,7 @@ var (
 
 func corsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
@@ -93,6 +93,38 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"message":  "contract added",
 			"endpoint": key,
+		})
+	})
+
+	// DELETE /contract — remove a contract by method and endpoint
+	http.HandleFunc("/contract/delete", func(w http.ResponseWriter, r *http.Request) {
+		corsHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		method := r.URL.Query().Get("method")
+		endpoint := r.URL.Query().Get("endpoint")
+		if method == "" || endpoint == "" {
+			http.Error(w, "method and endpoint query params required", http.StatusBadRequest)
+			return
+		}
+		key := method + " " + endpoint
+		mu.Lock()
+		delete(contracts, key)
+		mu.Unlock()
+		if err := db.DeleteContract(key); err != nil {
+			fmt.Println("Failed to delete contract from DB:", err)
+		}
+		fmt.Printf("Contract deleted: %s\n", key)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "contract deleted",
+			"key":     key,
 		})
 	})
 
