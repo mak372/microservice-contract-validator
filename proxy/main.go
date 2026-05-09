@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"go_project/config"
@@ -11,8 +10,6 @@ import (
 	"go_project/validator"
 	"io"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"sync"
 )
 
@@ -149,7 +146,6 @@ func main() {
 		}
 
 		reqBody, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 
 		fmt.Println("=== INCOMING REQUEST ===")
 		fmt.Printf("Endpoint: %s %s\n", r.Method, r.URL.Path)
@@ -183,32 +179,32 @@ func main() {
 			return
 		}
 
-		recorder := newResponseRecorder()
-		target, err := url.Parse(c.Target)
+		targetURL := c.Target + r.URL.Path
+		if r.URL.RawQuery != "" {
+			targetURL += "?" + r.URL.RawQuery
+		}
+		outReq, err := http.NewRequest(r.Method, targetURL, bytes.NewBuffer(reqBody))
 		if err != nil {
-			http.Error(w, "invalid contract target: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "failed to create upstream request: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		r.Header.Del("Accept-Encoding")
-		rp := httputil.NewSingleHostReverseProxy(target)
-		rp.Transport = &http.Transport{DisableCompression: true}
-		rp.ServeHTTP(recorder, r)
+		outReq.Header.Set("Content-Type", "application/json")
 
-		respBody := recorder.body.Bytes()
-		if recorder.header.Get("Content-Encoding") == "gzip" {
-			gr, err := gzip.NewReader(bytes.NewReader(respBody))
-			if err == nil {
-				decompressed, err := io.ReadAll(gr)
-				gr.Close()
-				if err == nil {
-					respBody = decompressed
-					recorder.header.Del("Content-Encoding")
-				}
-			}
+		client := &http.Client{}
+		upstreamResp, err := client.Do(outReq)
+		if err != nil {
+			http.Error(w, "failed to reach upstream: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer upstreamResp.Body.Close()
+		respBody, err := io.ReadAll(upstreamResp.Body)
+		if err != nil {
+			http.Error(w, "failed to read upstream response: "+err.Error(), http.StatusBadGateway)
+			return
 		}
 
 		fmt.Println("=== OUTGOING RESPONSE ===")
-		fmt.Printf("Status: %d\n", recorder.status)
+		fmt.Printf("Status: %d\n", upstreamResp.StatusCode)
 		fmt.Printf("Body: %s\n", string(respBody))
 
 		respViolations := validator.ValidateJSON(respBody, c.Response, "RESPONSE", c)
@@ -225,12 +221,8 @@ func main() {
 			return
 		}
 
-		for k, v := range recorder.header {
-			for _, vv := range v {
-				w.Header().Add(k, vv)
-			}
-		}
-		w.WriteHeader(recorder.status)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(upstreamResp.StatusCode)
 		w.Write(respBody)
 
 		fmt.Println("========================")
@@ -240,28 +232,3 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 }
 
-type ResponseRecorder struct {
-	header http.Header
-	status int
-	body   *bytes.Buffer
-}
-
-func newResponseRecorder() *ResponseRecorder {
-	return &ResponseRecorder{
-		header: make(http.Header),
-		body:   &bytes.Buffer{},
-		status: http.StatusOK,
-	}
-}
-
-func (r *ResponseRecorder) Header() http.Header {
-	return r.header
-}
-
-func (r *ResponseRecorder) WriteHeader(status int) {
-	r.status = status
-}
-
-func (r *ResponseRecorder) Write(b []byte) (int, error) {
-	return r.body.Write(b)
-}
