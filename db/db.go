@@ -35,13 +35,16 @@ func Init() error {
 func createTables() error {
 	_, err := DB.Exec(`
 		CREATE TABLE IF NOT EXISTS contracts (
-			key      TEXT PRIMARY KEY,
-			endpoint TEXT NOT NULL,
-			method   TEXT NOT NULL,
-			target   TEXT NOT NULL,
-			request  JSONB NOT NULL,
-			response JSONB NOT NULL
+			key        TEXT PRIMARY KEY,
+			endpoint   TEXT NOT NULL,
+			method     TEXT NOT NULL,
+			target     TEXT NOT NULL,
+			request    JSONB NOT NULL,
+			response   JSONB NOT NULL,
+			created_at TEXT NOT NULL DEFAULT ''
 		);
+
+		ALTER TABLE contracts ADD COLUMN IF NOT EXISTS created_at TEXT NOT NULL DEFAULT '';
 
 		CREATE TABLE IF NOT EXISTS violations (
 			id        SERIAL PRIMARY KEY,
@@ -61,17 +64,18 @@ func SaveContract(c *config.Contract) error {
 	req, _ := json.Marshal(c.Request)
 	res, _ := json.Marshal(c.Response)
 	key := c.Method + " " + c.Endpoint
+	c.CreatedAt = time.Now().Format(time.RFC3339)
 	_, err := DB.Exec(`
-		INSERT INTO contracts (key, endpoint, method, target, request, response)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO contracts (key, endpoint, method, target, request, response, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (key) DO UPDATE
-		SET endpoint=$2, method=$3, target=$4, request=$5, response=$6
-	`, key, c.Endpoint, c.Method, c.Target, req, res)
+		SET endpoint=$2, method=$3, target=$4, request=$5, response=$6, created_at=$7
+	`, key, c.Endpoint, c.Method, c.Target, req, res, c.CreatedAt)
 	return err
 }
 
 func LoadAllContracts() (map[string]*config.Contract, error) {
-	rows, err := DB.Query(`SELECT key, endpoint, method, target, request, response FROM contracts`)
+	rows, err := DB.Query(`SELECT key, endpoint, method, target, request, response, created_at FROM contracts`)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +86,7 @@ func LoadAllContracts() (map[string]*config.Contract, error) {
 		var key string
 		var c config.Contract
 		var req, res []byte
-		if err := rows.Scan(&key, &c.Endpoint, &c.Method, &c.Target, &req, &res); err != nil {
+		if err := rows.Scan(&key, &c.Endpoint, &c.Method, &c.Target, &req, &res, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		json.Unmarshal(req, &c.Request)

@@ -6,11 +6,12 @@ import (
 )
 
 type Contract struct {
-	Endpoint string                 `json:"endpoint"`
-	Method   string                 `json:"method"`
-	Target   string                 `json:"target"`
-	Request  map[string]interface{} `json:"request"`
-	Response map[string]interface{} `json:"response"`
+	Endpoint  string                 `json:"endpoint"`
+	Method    string                 `json:"method"`
+	Target    string                 `json:"target"`
+	Request   map[string]interface{} `json:"request"`
+	Response  map[string]interface{} `json:"response"`
+	CreatedAt string                 `json:"createdAt"`
 }
 
 func LoadContract(path string) (*Contract, error) {

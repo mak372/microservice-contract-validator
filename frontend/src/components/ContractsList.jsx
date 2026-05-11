@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import ContractForm from "./ContractForm";
 
 const PROXY = import.meta.env.VITE_PROXY_URL || "http://localhost:8080";
@@ -8,6 +8,7 @@ export default function ContractsList() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const sessionStart = useRef(new Date());
 
   async function handleDelete(c) {
     if (!window.confirm(`Delete contract ${c.method} ${c.endpoint}?`)) return;
@@ -27,7 +28,10 @@ export default function ContractsList() {
     try {
       const res = await fetch(`${PROXY}/contracts`);
       const data = await res.json();
-      setContracts(data);
+      const sessionContracts = data.filter(
+        (c) => c.createdAt && new Date(c.createdAt) >= sessionStart.current
+      );
+      setContracts(sessionContracts);
     } catch {
       setContracts([]);
     } finally {
@@ -55,7 +59,7 @@ export default function ContractsList() {
     <div className="panel">
       <h2>Published Contracts</h2>
       {loading && <p>Loading...</p>}
-      {!loading && contracts.length === 0 && <p>No contracts published yet.</p>}
+      {!loading && contracts.length === 0 && <p>No contracts published this session.</p>}
       {!loading && contracts.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
