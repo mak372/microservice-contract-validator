@@ -49,9 +49,44 @@ Response Schema:
           which endpoint, which direction (request or response), and what fields failed.
         </Step>
 
-        <Step number="4" title="View & Edit Contracts">
+        <Step number="4" title="View, Edit & Delete Contracts">
           Click <strong>View Contracts</strong> to see all published contracts.
-          Click <strong>Edit</strong> on any contract to update its schema or target.
+          Click <strong>Edit</strong> to update a contract's schema or target.
+          Click <strong>Delete</strong> to remove a contract permanently.
+        </Step>
+
+        <Step number="5" title="Supported Schema Types">
+          When defining request or response schemas, use these formats:
+          <Code>{`// Primitives
+{ "name": "string" }
+{ "age": "number" }
+{ "active": "boolean" }
+
+// Unvalidated object (any shape allowed)
+{ "address": "object" }
+
+// Validated nested object (specific fields checked)
+{
+  "address": {
+    "street": "string",
+    "city": "string",
+    "pincode": "string"
+  }
+}
+
+// Array of primitives
+{ "tags": ["string"] }
+
+// Array of objects
+{
+  "items": [
+    { "id": "number", "name": "string" }
+  ]
+}`}</Code>
+          <br />
+          Extra fields not in the schema → <strong>blocked (unexpected field)</strong><br />
+          Missing fields → <strong>blocked (missing field)</strong><br />
+          Wrong type → <strong>blocked (wrong type)</strong>
         </Step>
 
         <div style={{ marginTop: "1.5rem", padding: "0.75rem 1rem", background: "#1a1a2e", borderRadius: "6px", fontSize: "0.85rem", color: "#aaa" }}>
