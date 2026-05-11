@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const PROXY = import.meta.env.VITE_PROXY_URL || "http://localhost:8080";
 
@@ -6,12 +6,16 @@ export default function ViolationsLog() {
   const [violations, setViolations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const sessionStart = useRef(new Date());
 
   useEffect(() => {
     fetch(`${PROXY}/violations`)
       .then((res) => res.json())
       .then((data) => {
-        setViolations(data);
+        const sessionViolations = data.filter(
+          (v) => new Date(v.timestamp) >= sessionStart.current
+        );
+        setViolations(sessionViolations);
         setLoading(false);
       })
       .catch((err) => {
