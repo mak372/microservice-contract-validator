@@ -1,14 +1,14 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import ContractForm from "./ContractForm";
 
 const PROXY = import.meta.env.VITE_PROXY_URL || "http://localhost:8080";
+const SESSION_START = new Date();
 
 export default function ContractsList() {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
-  const sessionStart = useRef(new Date());
 
   async function handleDelete(c) {
     if (!window.confirm(`Delete contract ${c.method} ${c.endpoint}?`)) return;
@@ -29,7 +29,7 @@ export default function ContractsList() {
       const res = await fetch(`${PROXY}/contracts`);
       const data = await res.json();
       const sessionContracts = data.filter(
-        (c) => c.createdAt && new Date(c.createdAt) >= sessionStart.current
+        (c) => c.createdAt && new Date(c.createdAt) >= SESSION_START
       );
       setContracts(sessionContracts);
     } catch {
